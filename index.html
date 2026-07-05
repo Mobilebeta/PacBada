@@ -50,10 +50,11 @@
 
     <script>
         // =========================================================
-        // !!! 请确保这 3 个文件名和你 Build 文件夹里的完全一致 !!!
+        // 文件路径配置（请确保和 Build 文件夹里的文件名完全一致）
         // =========================================================
         var buildFiles = {
             loaderUrl: "Build/PacbadaWebMobileFinal.loader.js",
+            frameworkUrl: "Build/PacbadaWebMobileFinal.framework.js",
             dataUrl: "Build/PacbadaWebMobileFinal.data",
             wasmUrl: "Build/PacbadaWebMobileFinal.wasm",
         };
@@ -97,7 +98,7 @@
         });
 
         // =========================================================
-        // Unity 加载逻辑
+        // 状态元素
         // =========================================================
         var statusEl = document.getElementById("loading-status");
         var fillEl = document.getElementById("progress-fill");
@@ -108,72 +109,103 @@
             throw new Error("No WebGL");
         }
 
-        var config = {
-            dataUrl: buildFiles.dataUrl,
-            frameworkUrl: buildFiles.loaderUrl,
-            codeUrl: buildFiles.wasmUrl,
-            streamingAssetsUrl: "StreamingAssets",
-            companyName: "DefaultCompany",
-            productName: "PacBada",
-            productVersion: "1.0",
-            showBanner: false,
-        };
-
-        function onProgress(progress) {
-            var pct = Math.min(100, Math.round(progress * 100));
-            fillEl.style.width = pct + "%";
-            statusEl.innerHTML = "加载中 " + pct + "%";
-            if (pct >= 100) {
-                document.getElementById("loading-area").style.display = "none";
-            }
-        }
-
-        function onSuccess(instance) {
-            document.getElementById("loading-area").style.display = "none";
-            console.log("游戏启动成功！");
-            setTimeout(fitCanvas, 100);
-            setTimeout(fitCanvas, 500);
-        }
-
-        function onError(err) {
-            statusEl.innerHTML = "❌ 加载失败";
-            errorEl.style.display = "block";
-            errorEl.innerHTML = "错误详情：<br>" + (err.message || err);
-            console.error("Unity 加载错误:", err);
-            
-            if (err.toString().indexOf("404") !== -1 || err.toString().indexOf("Not Found") !== -1) {
-                errorEl.innerHTML += "<br><br>⚠️ 提示：可能是 Build 文件夹里的文件名和代码中的不一致，请去 Build 文件夹核实文件名并修改代码。";
-            }
-        }
-
-        setTimeout(fitCanvas, 10);
-
         // =========================================================
-        // 【关键修改】手动加载 loader.js，然后调用 createUnityInstance
+        // 【关键修改】先手动加载 framework.js，再加载 loader.js
         // =========================================================
-        var script = document.createElement('script');
-        script.src = buildFiles.loaderUrl;
-        script.onload = function() {
-            console.log('loader.js 加载完成');
-            if (typeof createUnityInstance !== 'undefined') {
-                console.log('createUnityInstance 已定义，开始加载游戏');
-                createUnityInstance(canvas, config, onProgress)
-                    .then(onSuccess)
-                    .catch(onError);
-            } else {
-                console.error('loader.js 加载后仍未定义 createUnityInstance');
-                statusEl.innerHTML = '❌ loader.js 执行失败，请查看控制台错误';
-                errorEl.style.display = 'block';
-                errorEl.innerHTML = 'loader.js 加载后未定义 createUnityInstance。请检查控制台是否有其他报错。';
+        var frameworkLoaded = false;
+        var loaderLoaded = false;
+
+        function checkAndStart() {
+            if (frameworkLoaded && loaderLoaded) {
+                console.log('✅ framework.js 和 loader.js 都已加载');
+                if (typeof unityFramework !== 'undefined') {
+                    console.log('✅ unityFramework 已定义');
+                } else {
+                    console.error('❌ unityFramework 未定义');
+                    statusEl.innerHTML = '❌ unityFramework 未定义';
+                    return;
+                }
+                if (typeof createUnityInstance !== 'undefined') {
+                    console.log('✅ createUnityInstance 已定义，开始加载游戏');
+                    startUnity();
+                } else {
+                    console.error('❌ createUnityInstance 未定义');
+                    statusEl.innerHTML = '❌ createUnityInstance 未定义';
+                }
             }
+        }
+
+        // 手动加载 framework.js
+        var frameworkScript = document.createElement('script');
+        frameworkScript.src = buildFiles.frameworkUrl;
+        frameworkScript.onload = function() {
+            console.log('✅ framework.js 加载完成');
+            frameworkLoaded = true;
+            checkAndStart();
         };
-        script.onerror = function() {
-            console.error('loader.js 加载失败');
+        frameworkScript.onerror = function() {
+            console.error('❌ framework.js 加载失败');
+            statusEl.innerHTML = '❌ framework.js 加载失败';
+        };
+        document.head.appendChild(frameworkScript);
+
+        // 手动加载 loader.js
+        var loaderScript = document.createElement('script');
+        loaderScript.src = buildFiles.loaderUrl;
+        loaderScript.onload = function() {
+            console.log('✅ loader.js 加载完成');
+            loaderLoaded = true;
+            checkAndStart();
+        };
+        loaderScript.onerror = function() {
+            console.error('❌ loader.js 加载失败');
             statusEl.innerHTML = '❌ loader.js 加载失败';
-            errorEl.style.display = 'block';
-            errorEl.innerHTML = 'loader.js 文件加载失败，请检查网络或文件名。';
         };
-        document.head.appendChild(script);
+        document.head.appendChild(loaderScript);
+
+        // =========================================================
+        // Unity 启动函数
+        // =========================================================
+        function startUnity() {
+            var config = {
+                dataUrl: buildFiles.dataUrl,
+                frameworkUrl: buildFiles.frameworkUrl,
+                codeUrl: buildFiles.wasmUrl,
+                streamingAssetsUrl: "StreamingAssets",
+                companyName: "DefaultCompany",
+                productName: "PacBada",
+                productVersion: "1.0",
+                showBanner: false,
+            };
+
+            function onProgress(progress) {
+                var pct = Math.min(100, Math.round(progress * 100));
+                fillEl.style.width = pct + "%";
+                statusEl.innerHTML = "加载中 " + pct + "%";
+                if (pct >= 100) {
+                    document.getElementById("loading-area").style.display = "none";
+                }
+            }
+
+            function onSuccess(instance) {
+                document.getElementById("loading-area").style.display = "none";
+                console.log("🎮 游戏启动成功！");
+                setTimeout(fitCanvas, 100);
+                setTimeout(fitCanvas, 500);
+            }
+
+            function onError(err) {
+                statusEl.innerHTML = "❌ 加载失败";
+                errorEl.style.display = "block";
+                errorEl.innerHTML = "错误详情：<br>" + (err.message || err);
+                console.error("Unity 加载错误:", err);
+            }
+
+            setTimeout(fitCanvas, 10);
+            createUnityInstance(canvas, config, onProgress)
+                .then(onSuccess)
+                .catch(onError);
+        }
     </script>
 </body>
 </html>
