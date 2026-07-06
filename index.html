@@ -33,7 +33,6 @@
         #unity-canvas {
             background: #000;
             display: block;
-            /* 不设置任何定位，由父级flex完全居中 */
         }
         #loading-area {
             position: fixed;
@@ -133,7 +132,7 @@
         var unityInstance = null;
 
         // =========================================================
-        // ★ 核心适配函数（强制覆盖 Canvas 分辨率）
+        // ★ 核心适配函数（强制覆盖版 —— 专治画面放大）
         // =========================================================
         function fitCanvas() {
             if (!canvas) return;
@@ -155,36 +154,40 @@
             displayW = Math.round(displayW);
             displayH = Math.round(displayH);
 
-            // 只设置 CSS 尺寸，不再设置绝对定位（居中由父级 flex 完成）
+            // CSS 显示尺寸
             canvas.style.width = displayW + 'px';
             canvas.style.height = displayH + 'px';
+            canvas.style.position = 'absolute';
+            canvas.style.left = '50%';
+            canvas.style.top = '50%';
+            canvas.style.transform = 'translate(-50%, -50%)';
             canvas.style.background = '#000';
 
-            // 强制覆盖物理像素（去掉 if 判断，确保每次都重新赋值）
+            // ★★★★★ 关键修正：无论当前值如何，强制覆盖物理像素（去掉 if 判断）★★★★★
             var realW = displayW * dpr;
             var realH = displayH * dpr;
             canvas.width = realW;
             canvas.height = realH;
             console.log('🔥 强制覆盖 Canvas 分辨率: ' + realW + 'x' + realH);
 
-            // 同步 Unity 内部渲染分辨率
+            // 同步 Unity 引擎内部渲染分辨率
             if (unityInstance && typeof unityInstance.SetResolution === 'function') {
                 unityInstance.SetResolution(canvas.width, canvas.height);
                 console.log('✅ 同步 Unity 分辨率: ' + canvas.width + 'x' + canvas.height);
             }
         }
 
-        // ★ 全局刷新函数（供外部调用）
+        // ★ 全局刷新函数（供 Unity 或外部调用）
         window.refreshGameCanvas = function() {
             console.log('🔄 收到刷新请求');
             dpr = window.devicePixelRatio || 1;
             fitCanvas();
-            // 额外派发 resize 事件，确保 Unity 内部布局更新
+            // 额外触发 resize 事件，以防 Unity 内部监听
             window.dispatchEvent(new Event('resize'));
         };
 
         // =========================================================
-        // 事件监听
+        // 监听事件（增强版）
         // =========================================================
         window.addEventListener('resize', function() {
             console.log('📐 resize 事件触发');
@@ -193,13 +196,14 @@
 
         window.addEventListener('orientationchange', function() {
             console.log('🔄 orientationchange 事件触发');
+            // 首次延迟 600ms，再二次延迟 1200ms 双重保险
             setTimeout(function() {
                 window.refreshGameCanvas();
                 setTimeout(window.refreshGameCanvas, 600);
             }, 600);
         });
 
-        // 页面从后台切回前台时重新适配
+        // 监听页面可见性变化（切回前台时重新适配）
         document.addEventListener('visibilitychange', function() {
             if (!document.hidden) {
                 console.log('👀 页面可见性变化（回到前台）');
@@ -280,8 +284,8 @@
                 // 立即适配一次
                 window.refreshGameCanvas();
 
-                // ★ 关键修补：在 3-2-1 倒计时期间（0.5s ~ 5s）每 300ms 暴力刷新
-                // 彻底压制 Unity 内部可能错误修改 Canvas 的行为
+                // ★ 关键修补：在 3-2-1 倒计时期间（0.5s ~ 5s）每 300ms 暴力刷新一次
+                // 彻底压住 Unity 内部可能错误修改 Canvas 物理像素的行为
                 for (var i = 0; i < 16; i++) {
                     (function(index) {
                         var delay = 500 + index * 300; // 500ms, 800ms, 1100ms ... 5000ms
