@@ -347,7 +347,7 @@
             function onProgress(progress) {
                 var pct = Math.min(100, Math.round(progress * 100));
                 fillEl.style.width = pct + '%';
-                statusEl.innerHTML = '加载中 ' + pct + '%';
+                statusEl.innerHTML = 'Loading... ' + pct + '%';
                 if (pct >= 100) {
                     document.getElementById('loading-area').style.display = 'none';
                 }
