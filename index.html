@@ -114,6 +114,55 @@
         }
 
         // =========================================================
+        // ★ 音频上下文恢复函数（新增）
+        function resumeAudioContext() {
+            if (!unityInstance) {
+                console.log('⏳ Unity 实例尚未初始化，稍后重试');
+                return;
+            }
+            try {
+                // 尝试多种可能的音频上下文位置
+                var ctx = unityInstance.Module.webaudioContext || 
+                          unityInstance.Module.audioContext || 
+                          (unityInstance.Module.ctx && unityInstance.Module.ctx.audioContext);
+                if (ctx && typeof ctx.resume === 'function' && ctx.state === 'suspended') {
+                    ctx.resume().then(function() {
+                        console.log('✅ 音频上下文已恢复');
+                    }).catch(function(e) {
+                        console.warn('⚠️ 恢复音频上下文失败:', e);
+                    });
+                } else if (ctx) {
+                    console.log('ℹ️ 音频上下文状态:', ctx.state);
+                } else {
+                    console.log('ℹ️ 未找到音频上下文，可能已激活或无需恢复');
+                }
+            } catch (e) {
+                console.warn('⚠️ 访问音频上下文出错:', e);
+            }
+        }
+
+        // ★ 监听用户首次交互（点击/触摸）恢复音频（新增）
+        function setupAudioResume() {
+            var eventNames = ['click', 'touchstart'];
+            var handler = function() {
+                resumeAudioContext();
+                // 移除所有监听，仅执行一次
+                eventNames.forEach(function(name) {
+                    document.removeEventListener(name, handler);
+                });
+                canvas.removeEventListener('click', handler);
+                canvas.removeEventListener('touchstart', handler);
+            };
+            eventNames.forEach(function(name) {
+                document.addEventListener(name, handler, { passive: true });
+            });
+            // 也在 canvas 上监听，确保捕获
+            canvas.addEventListener('click', handler, { passive: true });
+            canvas.addEventListener('touchstart', handler, { passive: true });
+            console.log('🎵 已注册音频恢复监听（点击任意位置）');
+        }
+
+        // =========================================================
         // 监听事件（保留）
         window.addEventListener('resize', function() {
             setTimeout(window.refreshGameCanvas, 200);
@@ -202,6 +251,12 @@
 
                 // 启动 RAF 循环（每帧强制修正）
                 startRafLoop();
+
+                // ★ 音频恢复：设置监听（如果之前已经注册过，确保 Unity 实例存在后再次尝试）
+                setupAudioResume();
+
+                // ★ 额外延迟尝试一次恢复（可能上下文已存在但处于挂起）
+                setTimeout(resumeAudioContext, 500);
             }
 
             function onError(err) {
@@ -215,6 +270,10 @@
             createUnityInstance(canvas, config, onProgress).then(onSuccess).catch(onError);
         }
 
+        // ★ 在页面加载后尽早注册音频恢复监听（即使 Unity 未加载，点击时也会尝试）
+        setupAudioResume();
+
+        // 初始适配
         setTimeout(window.refreshGameCanvas, 50);
     </script>
 </body>
