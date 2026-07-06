@@ -18,15 +18,31 @@
         @media (orientation:portrait) { #rotate-tip { display:flex !important; } }
         @media (orientation:landscape) { #rotate-tip { display:none !important; } }
 
-        /* 透明拦截层 */
+        /* ===== 修改：让拦截层变成半透明遮罩并显示文字 ===== */
         #click-catcher {
-            position:absolute;
-            top:0; left:0;
-            width:100%; height:100%;
-            z-index:10;
-            background:transparent;
-            touch-action:none;
-            display:block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.7);        /* 半透明黑色背景 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            font-size: 28px;
+            text-align: center;
+            touch-action: none;
+            cursor: pointer;
+            user-select: none;
+        }
+        #click-catcher span {
+            font-size: 16px;
+            color: #aaa;
+            margin-top: 12px;
         }
     </style>
 </head>
@@ -40,7 +56,11 @@
     </div>
     <div id="unity-container">
         <canvas id="unity-canvas"></canvas>
-        <div id="click-catcher"></div>
+        <!-- 拦截层（现在变成带文字的半透明遮罩） -->
+        <div id="click-catcher">
+            👆 点击任意位置开始游戏
+            <span>（点击后自动激活声音并开始）</span>
+        </div>
     </div>
 
     <script>
@@ -67,9 +87,10 @@
         var rafId = null;
         var audioCtx = null;
         var keepAliveInterval = null;
+        var isAudioReady = false;
 
         // =========================================================
-        // ★ 核心适配函数（每帧调用）+ 音频上下文恢复
+        // ★ 核心适配函数（每帧调用）
         function fitCanvas() {
             if (!canvas) return;
             var screenW = document.documentElement.clientWidth;
@@ -196,56 +217,7 @@
         }
 
         // =========================================================
-        // ★ 模拟完整点击事件（pointerdown + pointerup + click）
-        function simulateClick(target, clientX, clientY) {
-            if (!target) return;
-            // 创建 PointerEvent（如果浏览器支持）
-            try {
-                var pointerDown = new PointerEvent('pointerdown', {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window,
-                    clientX: clientX,
-                    clientY: clientY,
-                    pointerId: 1,
-                    pointerType: 'touch',
-                    isPrimary: true
-                });
-                target.dispatchEvent(pointerDown);
-            } catch(e) {
-                // 降级为 MouseEvent
-                var ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: clientX, clientY: clientY });
-                target.dispatchEvent(ev);
-            }
-
-            // 短延迟后触发 pointerup 和 click
-            setTimeout(function() {
-                try {
-                    var pointerUp = new PointerEvent('pointerup', {
-                        bubbles: true,
-                        cancelable: true,
-                        view: window,
-                        clientX: clientX,
-                        clientY: clientY,
-                        pointerId: 1,
-                        pointerType: 'touch',
-                        isPrimary: true
-                    });
-                    target.dispatchEvent(pointerUp);
-                } catch(e) {
-                    var ev2 = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: clientX, clientY: clientY });
-                    target.dispatchEvent(ev2);
-                }
-                // click 事件
-                try {
-                    var clickEv = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: clientX, clientY: clientY });
-                    target.dispatchEvent(clickEv);
-                } catch(e) {}
-                console.log('📤 模拟点击完成');
-            }, 30);
-        }
-
-        // ★ 用户交互处理（拦截层）
+        // ★ 模拟双击（先启动音频，延迟再模拟点击）
         function setupUserInteraction() {
             if (!catcher) {
                 console.warn('⚠️ 拦截层不存在');
@@ -253,35 +225,57 @@
             }
             var handler = function(e) {
                 e.preventDefault();
-                console.log('👆 用户点击拦截层，激活音频并模拟点击');
-                // 启动音频保活
-                startAudioKeepAlive();
+                console.log('👆 用户点击拦截层，启动音频并准备模拟双击');
+                // 如果音频保活未启动，启动
+                if (!keepAliveInterval) {
+                    startAudioKeepAlive();
+                }
                 findUnityAudioContext();
+
+                // 立即尝试恢复 Unity 上下文
                 if (audioCtx && audioCtx.state === 'suspended') {
                     audioCtx.resume().catch(function() {});
                 }
 
-                // 获取点击坐标
-                var clientX = e.clientX || (e.touches && e.touches[0] && e.touches[0].clientX) || window.innerWidth/2;
-                var clientY = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY) || window.innerHeight/2;
-
-                // 隐藏拦截层
+                // 隐藏拦截层，让点击穿透到 Canvas
                 catcher.style.display = 'none';
-                // 模拟点击 Canvas
-                simulateClick(canvas, clientX, clientY);
 
-                // 移除监听
+                // 模拟第一次点击（直接转发原生点击事件）
+                var ev1 = new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: e.clientX || window.innerWidth/2,
+                    clientY: e.clientY || window.innerHeight/2
+                });
+                canvas.dispatchEvent(ev1);
+                console.log('📤 发送第一次点击');
+
+                // 延迟 300ms 模拟第二次点击（模拟双击）
+                setTimeout(function() {
+                    var ev2 = new MouseEvent('click', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: e.clientX || window.innerWidth/2,
+                        clientY: e.clientY || window.innerHeight/2
+                    });
+                    canvas.dispatchEvent(ev2);
+                    console.log('📤 发送第二次点击（延迟模拟双击）');
+                }, 300);
+
+                // 移除监听器（只执行一次）
                 catcher.removeEventListener('click', handler);
                 catcher.removeEventListener('touchstart', handler);
             };
 
             catcher.addEventListener('click', handler, { passive: false });
             catcher.addEventListener('touchstart', handler, { passive: false });
-            console.log('🎯 已注册拦截层点击监听（模拟完整事件）');
+            console.log('🎵 已注册拦截层点击监听（模拟双击）');
         }
 
         // =========================================================
-        // 常规事件监听
+        // 监听事件（保留）
         window.addEventListener('resize', function() {
             setTimeout(window.refreshGameCanvas, 200);
         });
@@ -367,9 +361,12 @@
                 window.refreshGameCanvas();
                 startRafLoop();
 
+                // 查找音频上下文
                 findUnityAudioContext();
+                // 设置用户交互（拦截层）
                 setupUserInteraction();
 
+                // 延迟重试查找
                 setTimeout(findUnityAudioContext, 500);
                 setTimeout(findUnityAudioContext, 1000);
                 setTimeout(findUnityAudioContext, 2000);
@@ -386,6 +383,7 @@
             createUnityInstance(canvas, config, onProgress).then(onSuccess).catch(onError);
         }
 
+        // 预先设置拦截层（但此时 Unity 可能未加载，只注册事件）
         setupUserInteraction();
         setTimeout(window.refreshGameCanvas, 50);
     </script>
