@@ -6,36 +6,26 @@
     <title>PacBada Mobile</title>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
-        html, body { width:100%; height:100%; overflow:hidden; background:#000; position:fixed; top:0; left:0; }
+        html,body { width:100%; height:100%; overflow:hidden; background:#000; position:fixed; top:0; left:0; }
         #unity-container { width:100vw; height:100vh; background:#000; display:flex; justify-content:center; align-items:center; position:fixed; top:0; left:0; }
-        #unity-canvas { background:#000; display:block; transform:translateY(0px); }
+        #unity-canvas { background:#000; display:block; }
         #loading-area { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); color:#fff; font-family:Arial,sans-serif; z-index:20; text-align:center; width:80%; max-width:400px; }
         #progress-bg { width:100%; height:6px; background:#333; border-radius:3px; margin:12px 0 0; }
         #progress-fill { width:0%; height:100%; background:#00ccff; border-radius:3px; }
         #error-msg { color:#ff5555; font-size:14px; margin-top:20px; word-break:break-all; display:none; }
         #rotate-tip { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); color:#fff; font-size:24px; display:none; justify-content:center; align-items:center; z-index:9999; flex-direction:column; text-align:center; font-family:Arial,sans-serif; }
         #rotate-tip span { font-size:16px; color:#aaa; margin-top:10px; }
-        @media (orientation:portrait) { #rotate-tip { display:flex !important; } }
-        @media (orientation:landscape) { #rotate-tip { display:none !important; } }
+        @media (orientation: portrait) { #rotate-tip { display:flex !important; } }
+        @media (orientation: landscape) { #rotate-tip { display:none !important; } }
     </style>
 </head>
 <body>
 
-    <div id="rotate-tip">📱⤵️Please rotate your phone<span>（Automatically enter after rotating the phone）</span></div>
-    <div id="loading-area">
-        <div id="loading-status">加载中...</div>
-        <div id="progress-bg"><div id="progress-fill"></div></div>
-        <div id="error-msg"></div>
-    </div>
+    <div id="rotate-tip">📱⤵️Please rotate your phone<span>(Automatically enter after rotating)</span></div>
+    <div id="loading-area"><div id="loading-status">加载中...</div><div id="progress-bg"><div id="progress-fill"></div></div><div id="error-msg"></div></div>
     <div id="unity-container"><canvas id="unity-canvas"></canvas></div>
 
     <script>
-        // =========================================================
-        // ★ 手动调整垂直偏移（正数下移，负数上移） ★
-        var VERTICAL_OFFSET = 0;
-
-        // =========================================================
-        // 文件路径配置
         var buildFiles = {
             loaderUrl: "Build/PacbadaWebMobileFinal.loader.js",
             frameworkUrl: "Build/PacbadaWebMobileFinal.framework.js",
@@ -49,16 +39,15 @@
         var GAME_RATIO = GAME_W / GAME_H;
         var dpr = window.devicePixelRatio || 1;
         var unityInstance = null;
-        var rafId = null;
+        var unityAudioCtx = null;
 
         // =========================================================
-        // ★ 核心适配函数（每帧调用）
-        function fitCanvas() {
-            if (!canvas) return;
-            var screenW = document.documentElement.clientWidth;
-            var screenH = document.documentElement.clientHeight;
-            if (screenW === 0 || screenH === 0) return;
-
+        // Canvas 尺寸修正（已解决画面放大/偏移）
+        // =========================================================
+        function getTargetSize() {
+            var screenW = window.innerWidth;
+            var screenH = window.innerHeight;
+            if (screenW === 0 || screenH === 0) return null;
             var screenRatio = screenW / screenH;
             var displayW, displayH;
             if (screenRatio > GAME_RATIO) {
@@ -70,156 +59,108 @@
             }
             displayW = Math.round(displayW);
             displayH = Math.round(displayH);
-
-            // 更新 CSS 显示尺寸（只在变化时更新，减少重排）
-            if (canvas.style.width !== displayW + 'px') {
-                canvas.style.width = displayW + 'px';
-            }
-            if (canvas.style.height !== displayH + 'px') {
-                canvas.style.height = displayH + 'px';
-            }
-            canvas.style.background = '#000';
-            canvas.style.transform = 'translateY(' + VERTICAL_OFFSET + 'px)';
-
-            // 强制覆盖物理像素（每帧强制执行，无 if 判断）
-            var realW = displayW * dpr;
-            var realH = displayH * dpr;
-            if (canvas.width !== realW || canvas.height !== realH) {
-                canvas.width = realW;
-                canvas.height = realH;
-            }
-
-            // 同步 Unity 渲染分辨率（每帧执行，无 if 判断，直接调用）
-            if (unityInstance && typeof unityInstance.SetResolution === 'function') {
-                unityInstance.SetResolution(canvas.width, canvas.height);
-            }
-        }
-
-        // ★ 全局刷新函数（外部调用用）
-        window.refreshGameCanvas = function() {
-            dpr = window.devicePixelRatio || 1;
-            fitCanvas();
-            window.dispatchEvent(new Event('resize'));
-        };
-
-        // ★ 使用 requestAnimationFrame 循环强制刷新（每帧都执行）
-        function startRafLoop() {
-            if (rafId) return;
-            function loop() {
-                fitCanvas();
-                rafId = requestAnimationFrame(loop);
-            }
-            loop();
-            console.log('▶️ RAF 循环已启动（每帧强制修正）');
-        }
-
-        // =========================================================
-        // ★ 音频上下文恢复函数（新增）
-        function resumeAudioContext() {
-            if (!unityInstance) {
-                console.log('⏳ Unity 实例尚未初始化，稍后重试');
-                return;
-            }
-            try {
-                // 尝试多种可能的音频上下文位置
-                var ctx = unityInstance.Module.webaudioContext || 
-                          unityInstance.Module.audioContext || 
-                          (unityInstance.Module.ctx && unityInstance.Module.ctx.audioContext);
-                if (ctx && typeof ctx.resume === 'function' && ctx.state === 'suspended') {
-                    ctx.resume().then(function() {
-                        console.log('✅ 音频上下文已恢复');
-                    }).catch(function(e) {
-                        console.warn('⚠️ 恢复音频上下文失败:', e);
-                    });
-                } else if (ctx) {
-                    console.log('ℹ️ 音频上下文状态:', ctx.state);
-                } else {
-                    console.log('ℹ️ 未找到音频上下文，可能已激活或无需恢复');
-                }
-            } catch (e) {
-                console.warn('⚠️ 访问音频上下文出错:', e);
-            }
-        }
-
-        // ★ 监听用户首次交互（点击/触摸）恢复音频（新增）
-        function setupAudioResume() {
-            var eventNames = ['click', 'touchstart'];
-            var handler = function() {
-                resumeAudioContext();
-                // 移除所有监听，仅执行一次
-                eventNames.forEach(function(name) {
-                    document.removeEventListener(name, handler);
-                });
-                canvas.removeEventListener('click', handler);
-                canvas.removeEventListener('touchstart', handler);
+            return {
+                cssW: displayW,
+                cssH: displayH,
+                realW: displayW * dpr,
+                realH: displayH * dpr
             };
-            eventNames.forEach(function(name) {
-                document.addEventListener(name, handler, { passive: true });
-            });
-            // 也在 canvas 上监听，确保捕获
-            canvas.addEventListener('click', handler, { passive: true });
-            canvas.addEventListener('touchstart', handler, { passive: true });
-            console.log('🎵 已注册音频恢复监听（点击任意位置）');
         }
 
-        // =========================================================
-        // 监听事件（保留）
+        function silentCorrect() {
+            var size = getTargetSize();
+            if (!size) return;
+            if (canvas.style.width !== size.cssW + 'px' || canvas.style.height !== size.cssH + 'px') {
+                canvas.style.width = size.cssW + 'px';
+                canvas.style.height = size.cssH + 'px';
+            }
+            if (canvas.width !== size.realW || canvas.height !== size.realH) {
+                canvas.width = size.realW;
+                canvas.height = size.realH;
+                if (unityInstance && typeof unityInstance.SetResolution === 'function') {
+                    unityInstance.SetResolution(size.realW, size.realH);
+                }
+                console.log('🔧 修正分辨率 ' + size.realW + 'x' + size.realH);
+            }
+        }
+
+        // ResizeObserver 安全网（被动修复）
+        var observer = new ResizeObserver(function() {
+            clearTimeout(window.__observerFixTimer);
+            window.__observerFixTimer = setTimeout(silentCorrect, 50);
+        });
+        observer.observe(canvas);
+
         window.addEventListener('resize', function() {
-            setTimeout(window.refreshGameCanvas, 200);
+            clearTimeout(window.__resizeTimer);
+            window.__resizeTimer = setTimeout(function() {
+                dpr = window.devicePixelRatio || 1;
+                silentCorrect();
+            }, 200);
         });
         window.addEventListener('orientationchange', function() {
             setTimeout(function() {
-                window.refreshGameCanvas();
-                setTimeout(window.refreshGameCanvas, 600);
+                dpr = window.devicePixelRatio || 1;
+                silentCorrect();
+                setTimeout(silentCorrect, 600);
             }, 600);
         });
         document.addEventListener('visibilitychange', function() {
             if (!document.hidden) {
-                setTimeout(window.refreshGameCanvas, 300);
+                setTimeout(function() {
+                    dpr = window.devicePixelRatio || 1;
+                    silentCorrect();
+                }, 300);
             }
         });
 
         // =========================================================
+        // ★ 音频解锁：第一次用户交互时恢复 Unity 的 AudioContext
+        // =========================================================
+        function unlockAudioOnFirstInteraction() {
+            if (unityAudioCtx && unityAudioCtx.state === 'suspended') {
+                unityAudioCtx.resume().then(function() {
+                    console.log('🔊 Unity AudioContext 已解锁');
+                }).catch(function(e) {
+                    console.warn('AudioContext 解锁失败:', e);
+                });
+            }
+            // 解除绑定
+            document.removeEventListener('click', unlockAudioOnFirstInteraction);
+            document.removeEventListener('touchstart', unlockAudioOnFirstInteraction);
+            document.removeEventListener('touchend', unlockAudioOnFirstInteraction);
+        }
+
+        // 尽早绑定（保证在用户点击“开始”按钮之前已监听）
+        document.addEventListener('click', unlockAudioOnFirstInteraction, { once: true });
+        document.addEventListener('touchstart', unlockAudioOnFirstInteraction, { once: true });
+        document.addEventListener('touchend', unlockAudioOnFirstInteraction, { once: true });
+
+        // =========================================================
         // 加载状态
+        // =========================================================
         var statusEl = document.getElementById('loading-status');
         var fillEl = document.getElementById('progress-fill');
         var errorEl = document.getElementById('error-msg');
+        if (!window.WebGLRenderingContext) { statusEl.innerHTML = '浏览器不支持 WebGL'; throw new Error('No WebGL'); }
 
-        if (!window.WebGLRenderingContext) {
-            statusEl.innerHTML = '浏览器不支持 WebGL';
-            throw new Error('No WebGL');
-        }
-
-        // =========================================================
-        // 手动加载 framework.js 与 loader.js
-        var frameworkLoaded = false;
-        var loaderLoaded = false;
-
+        var frameworkLoaded = false, loaderLoaded = false;
         function checkAndStart() {
-            if (frameworkLoaded && loaderLoaded) {
-                if (typeof unityFramework !== 'undefined' && typeof createUnityInstance !== 'undefined') {
-                    console.log('✅ 依赖就绪，启动 Unity');
-                    startUnity();
-                } else {
-                    statusEl.innerHTML = '❌ 缺少核心函数';
-                }
+            if (frameworkLoaded && loaderLoaded && typeof unityFramework !== 'undefined' && typeof createUnityInstance !== 'undefined') {
+                startUnity();
             }
         }
 
-        var frameworkScript = document.createElement('script');
-        frameworkScript.src = buildFiles.frameworkUrl;
-        frameworkScript.onload = function() { frameworkLoaded = true; checkAndStart(); };
-        frameworkScript.onerror = function() { statusEl.innerHTML = '❌ framework.js 加载失败'; };
-        document.head.appendChild(frameworkScript);
+        var fs = document.createElement('script'); fs.src = buildFiles.frameworkUrl;
+        fs.onload = function(){ frameworkLoaded = true; checkAndStart(); };
+        fs.onerror = function(){ statusEl.innerHTML = '❌ framework.js 加载失败'; };
+        document.head.appendChild(fs);
 
-        var loaderScript = document.createElement('script');
-        loaderScript.src = buildFiles.loaderUrl;
-        loaderScript.onload = function() { loaderLoaded = true; checkAndStart(); };
-        loaderScript.onerror = function() { statusEl.innerHTML = '❌ loader.js 加载失败'; };
-        document.head.appendChild(loaderScript);
+        var ls = document.createElement('script'); ls.src = buildFiles.loaderUrl;
+        ls.onload = function(){ loaderLoaded = true; checkAndStart(); };
+        ls.onerror = function(){ statusEl.innerHTML = '❌ loader.js 加载失败'; };
+        document.head.appendChild(ls);
 
-        // =========================================================
-        // 启动 Unity
         function startUnity() {
             var config = {
                 dataUrl: buildFiles.dataUrl,
@@ -236,45 +177,43 @@
                 var pct = Math.min(100, Math.round(progress * 100));
                 fillEl.style.width = pct + '%';
                 statusEl.innerHTML = '加载中 ' + pct + '%';
-                if (pct >= 100) {
-                    document.getElementById('loading-area').style.display = 'none';
-                }
+                if (pct >= 100) document.getElementById('loading-area').style.display = 'none';
             }
 
             function onSuccess(instance) {
                 document.getElementById('loading-area').style.display = 'none';
-                console.log('🎮 游戏启动成功');
                 unityInstance = instance;
+                dpr = window.devicePixelRatio || 1;
 
-                // 立即刷新一次
-                window.refreshGameCanvas();
+                // 获取 Unity 内部 AudioContext
+                if (instance.Module && instance.Module.audioContext) {
+                    unityAudioCtx = instance.Module.audioContext;
+                } else if (instance.Module && instance.Module.WebAudioContext) {
+                    unityAudioCtx = instance.Module.WebAudioContext;
+                }
+                console.log('🎮 Unity 启动成功', unityAudioCtx ? '(已捕获 AudioContext)' : '');
 
-                // 启动 RAF 循环（每帧强制修正）
-                startRafLoop();
-
-                // ★ 音频恢复：设置监听（如果之前已经注册过，确保 Unity 实例存在后再次尝试）
-                setupAudioResume();
-
-                // ★ 额外延迟尝试一次恢复（可能上下文已存在但处于挂起）
-                setTimeout(resumeAudioContext, 500);
+                // 画面快速修正序列
+                silentCorrect();
+                var delays = [100, 200, 400, 700, 1100, 1600];
+                for (var i = 0; i < delays.length; i++) {
+                    setTimeout(silentCorrect, delays[i]);
+                }
             }
 
             function onError(err) {
                 statusEl.innerHTML = '❌ 加载失败';
                 errorEl.style.display = 'block';
                 errorEl.innerHTML = '错误详情：<br>' + (err.message || err);
-                console.error('Unity 加载错误:', err);
             }
 
-            setTimeout(window.refreshGameCanvas, 50);
             createUnityInstance(canvas, config, onProgress).then(onSuccess).catch(onError);
         }
 
-        // ★ 在页面加载后尽早注册音频恢复监听（即使 Unity 未加载，点击时也会尝试）
-        setupAudioResume();
-
-        // 初始适配
-        setTimeout(window.refreshGameCanvas, 50);
+        setTimeout(function() {
+            dpr = window.devicePixelRatio || 1;
+            silentCorrect();
+        }, 50);
     </script>
 </body>
 </html>
