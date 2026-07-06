@@ -33,6 +33,7 @@
         #unity-canvas {
             background: #000;
             display: block;
+            /* 尺寸完全由 JS 控制 */
         }
         #loading-area {
             position: fixed;
@@ -54,10 +55,11 @@
             margin: 12px 0 0;
         }
         #progress-fill {
-            width: 200%;
+            width: 0%;
             height: 100%;
             background: #00ccff;
             border-radius: 3px;
+            /* 已移除 transition，防止干扰 */
         }
         #error-msg {
             color: #ff5555;
@@ -66,6 +68,7 @@
             word-break: break-all;
             display: none;
         }
+        /* 横屏提示 */
         #rotate-tip {
             position: fixed;
             top: 0;
@@ -115,7 +118,7 @@
 
     <script>
         // =========================================================
-        // 1. 配置
+        // 文件路径配置（请与 Build 文件夹内文件名完全一致）
         // =========================================================
         var buildFiles = {
             loaderUrl: "Build/PacbadaWebMobileFinal.loader.js",
@@ -128,12 +131,11 @@
         var GAME_W = 1280;
         var GAME_H = 720;
         var GAME_RATIO = GAME_W / GAME_H;
-
-        // 保存 Unity 实例（用于调用 SetResolution）
+        var dpr = window.devicePixelRatio || 1;
         var unityInstance = null;
 
         // =========================================================
-        // 2. Canvas CSS 等比缩放
+        // Canvas 尺寸同步（CSS 显示尺寸 + 实际渲染像素）
         // =========================================================
         function fitCanvas() {
             if (!canvas) return;
@@ -155,6 +157,7 @@
             displayW = Math.round(displayW);
             displayH = Math.round(displayH);
 
+            // CSS 显示尺寸（保持宽高比，居中）
             canvas.style.width = displayW + 'px';
             canvas.style.height = displayH + 'px';
             canvas.style.position = 'absolute';
@@ -162,20 +165,27 @@
             canvas.style.top = '50%';
             canvas.style.transform = 'translate(-50%, -50%)';
             canvas.style.background = '#000';
+
+            // Canvas 渲染像素尺寸 = 显示尺寸 × 设备像素比
+            var realW = displayW * dpr;
+            var realH = displayH * dpr;
+            if (canvas.width !== realW || canvas.height !== realH) {
+                canvas.width = realW;
+                canvas.height = realH;
+                console.log('Canvas 分辨率更新: ' + realW + 'x' + realH);
+            }
         }
 
-        // ★ 供 Unity 调用的全局刷新函数（倒计时结束时触发）
+        // ★ 供 Unity 倒计时结束后调用的全局函数
         window.refreshGameCanvas = function() {
-            console.log('Unity 请求强制刷新分辨率');
-            // 先保证 CSS 尺寸正确
+            console.log('收到 Unity 刷新请求');
+            dpr = window.devicePixelRatio || 1;   // 更新 dpr（可能变化）
             fitCanvas();
-            // 关键步骤：强制 Unity 重新设置渲染分辨率为设计分辨率
+            // 强制 Unity 内部渲染分辨率与 Canvas 实际像素一致
             if (unityInstance && typeof unityInstance.SetResolution === 'function') {
-                unityInstance.SetResolution(GAME_W, GAME_H);
-                console.log('已调用 SetResolution(' + GAME_W + ', ' + GAME_H + ')');
+                unityInstance.SetResolution(canvas.width, canvas.height);
+                console.log('已执行 SetResolution(' + canvas.width + ', ' + canvas.height + ')');
             } else {
-                console.warn('Unity 实例不可用，尝试备用方案');
-                // 备用：派发 resize 事件
                 window.dispatchEvent(new Event('resize'));
             }
         };
@@ -186,7 +196,7 @@
         });
 
         // =========================================================
-        // 3. 加载状态
+        // 加载状态元素
         // =========================================================
         var statusEl = document.getElementById('loading-status');
         var fillEl = document.getElementById('progress-fill');
@@ -198,7 +208,7 @@
         }
 
         // =========================================================
-        // 4. 手动加载 framework.js 和 loader.js
+        // 手动加载 framework.js 与 loader.js（绕开自动加载问题）
         // =========================================================
         var frameworkLoaded = false;
         var loaderLoaded = false;
@@ -206,7 +216,7 @@
         function checkAndStart() {
             if (frameworkLoaded && loaderLoaded) {
                 if (typeof unityFramework !== 'undefined' && typeof createUnityInstance !== 'undefined') {
-                    console.log('✅ 所有依赖已就绪，启动 Unity');
+                    console.log('✅ 依赖就绪，启动 Unity');
                     startUnity();
                 } else {
                     statusEl.innerHTML = '❌ 缺少核心函数';
@@ -227,7 +237,7 @@
         document.head.appendChild(loaderScript);
 
         // =========================================================
-        // 5. 启动 Unity
+        // 启动 Unity
         // =========================================================
         function startUnity() {
             var config = {
@@ -245,17 +255,20 @@
                 var pct = Math.min(100, Math.round(progress * 100));
                 fillEl.style.width = pct + '%';
                 statusEl.innerHTML = '加载中 ' + pct + '%';
-                if (pct >= 100) document.getElementById('loading-area').style.display = 'none';
+                if (pct >= 100) {
+                    document.getElementById('loading-area').style.display = 'none';
+                }
             }
 
             function onSuccess(instance) {
                 document.getElementById('loading-area').style.display = 'none';
                 console.log('🎮 游戏启动成功');
-                unityInstance = instance;          // ★ 保存实例
+                unityInstance = instance;
+                dpr = window.devicePixelRatio || 1;
                 fitCanvas();
-                // 启动后立即强制一次分辨率，避免初始错位
-                instance.SetResolution(GAME_W, GAME_H);
-                console.log('初始分辨率已设置为 ' + GAME_W + 'x' + GAME_H);
+                // 启动后立即同步一次渲染分辨率
+                instance.SetResolution(canvas.width, canvas.height);
+                console.log('启动分辨率: ' + canvas.width + 'x' + canvas.height);
             }
 
             function onError(err) {
